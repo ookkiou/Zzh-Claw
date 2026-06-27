@@ -37,3 +37,6 @@ ENV/
 
 # Sessions
 *.json
+
+# macOS
+.DS_Store
