@@ -1,5 +1,5 @@
 """
-session.py - 会话管理 (对应 coding-agent 的会话功能)
+zzhclaw.session - 会话管理
 支持保存/加载历史、会话分支
 """
 

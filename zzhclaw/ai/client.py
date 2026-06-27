@@ -1,5 +1,5 @@
 """
-ai.py - LLM API 封装 (对应 pi-ai)
+zzhclaw.ai - LLM API 封装
 """
 
 import os
@@ -19,9 +19,9 @@ class LLMClient:
         base_url: Optional[str] = None,
         model: Optional[str] = None
     ):
-        self.api_key = api_key or os.getenv("ANTHROPIC_API_KEY")
-        self.base_url = base_url or os.getenv("ANTHROPIC_BASE_URL")
-        self.model = model or os.getenv("ANTHROPIC_MODEL_ID", "deepseek-v4-flash")
+        self.api_key = api_key or os.getenv("OPENAI_API_KEY") or os.getenv("ANTHROPIC_API_KEY")
+        self.base_url = base_url or os.getenv("OPENAI_BASE_URL") or os.getenv("ANTHROPIC_BASE_URL")
+        self.model = model or os.getenv("OPENAI_MODEL_ID") or os.getenv("ANTHROPIC_MODEL_ID", "gpt-4o-mini")
 
         if not self.api_key or not self.base_url:
             raise ValueError("请配置 API_KEY 和 BASE_URL")

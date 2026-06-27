@@ -1,5 +1,5 @@
 """
-cli.py - 命令行界面 (对应 coding-agent)
+zzhclaw.cli - 命令行界面
 """
 
 import sys
@@ -10,8 +10,8 @@ from rich.syntax import Syntax
 from rich.markdown import Markdown
 from rich.table import Table
 from rich import box
-from .ai import LLMClient
-from .agent import Agent
+from ...ai import LLMClient
+from ...agent import Agent
 
 console = Console()
 
@@ -48,7 +48,7 @@ def run_cli():
     agent = Agent(llm)
 
     console.print(Panel.fit(
-        "[bold blue]ZzhClaw[/bold blue] - Python MVP (Step 3)\n"
+        "[bold blue]ZzhClaw[/bold blue]\n"
         f"模型: [green]{llm.model}[/green]\n"
         "输入 /help 查看命令",
         border_style="blue"

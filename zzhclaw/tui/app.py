@@ -1,5 +1,5 @@
 """
-tui.py - Textual 终端界面 (对应 pi-tui)
+zzhclaw.tui - Textual 终端界面
 """
 
 import json
@@ -11,9 +11,9 @@ from textual.widget import Widget
 from textual.reactive import var
 from textual.screen import Screen
 from rich.syntax import Syntax
-from .ai import LLMClient
-from .agent import Agent
-from .tools import execute_tool, TOOLS
+from ..ai import LLMClient
+from ..agent import Agent
+from ..coding.tools import execute_tool, TOOLS
 
 
 class MessageItem(Widget):
@@ -266,9 +266,7 @@ class ZzhClawApp(App):
             confirm_event = asyncio.Event()
             self.pending_confirm = (name, args, confirm_event)
 
-            # 这个会在同步上下文中调用，我们需要返回一个默认值，
-            # 实际上让 agent 先跳过，等用户确认后再重新处理？
-            # 简单点：TUI 暂时默认确认，CLI 有确认
+            # 简单点：TUI 暂时默认确认
             return True
 
         # AI 响应
@@ -276,7 +274,7 @@ class ZzhClawApp(App):
         log.mount(thinking)
         log.scroll_end()
 
-        # 运行 agent（TUI 暂时默认确认，需要完整确认得重构）
+        # 运行 agent
         response = self.agent.run(
             user_input,
             on_tool_call=on_tool_call,

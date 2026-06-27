@@ -1,5 +1,5 @@
 """
-tools.py - 工具定义 (对应 coding-agent 的工具)
+zzhclaw.tools - 工具定义
 """
 
 import os

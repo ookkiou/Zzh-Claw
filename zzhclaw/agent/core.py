@@ -1,12 +1,12 @@
 """
-agent.py - Agent 核心逻辑 (对应 pi-agent-core)
+zzhclaw.agent - Agent 核心逻辑
 """
 
 import json
 from typing import List, Dict, Any, Callable, Optional
-from .ai import LLMClient
-from .tools import TOOLS, execute_tool
-from .session import SessionManager
+from ..ai import LLMClient
+from ..coding.tools import TOOLS, execute_tool
+from ..coding.session import SessionManager
 
 
 class Agent:

@@ -16,7 +16,7 @@ def main():
     args = parser.parse_args()
 
     if args.mode == "cli":
-        from zzhclaw.cli import run_cli
+        from zzhclaw.coding.cli import run_cli
         run_cli()
     else:
         from zzhclaw.tui import run_tui
