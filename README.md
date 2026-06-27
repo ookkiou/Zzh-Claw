@@ -1,6 +1,18 @@
-# ZzhClaw Python
+# ZzhClaw 
 
-用 Python 复刻的 AI 编码助手
+🚀 用 Python 创作的 AI 编码助手，让你的终端也能拥有智能编程伙伴！
+
+## 简介
+
+ZzhClaw 是一个轻量级的 AI 助手，运行在你的终端里。它可以帮你：
+- 自然语言对话，解答编程问题
+- 直接读写文件，帮你修改代码
+- 执行终端命令，无需切换窗口
+- 联网搜索，获取最新信息
+- 读取网页内容，总结资料
+- 保存会话历史，随时继续之前的对话
+
+既可以用命令行（CLI）快速操作，也可以用终端界面（TUI）获得更直观的体验。
 
 ## 项目结构
 
@@ -37,13 +49,13 @@ pip3 install -r requirements.txt
 
 ## 运行
 
-### TUI 模式 (推荐)
+### TUI 模式 
 
 ```bash
 python3 zzhclaw.py
 ```
 
-### CLI 模式
+### CLI 模式 (推荐)
 
 ```bash
 python3 zzhclaw.py --mode cli
@@ -80,5 +92,6 @@ python3 zzhclaw.py --mode cli
 `~/.zzhclaw/sessions/`
 
 ## TODO
-增加TUI的权限准许功能
+增加TUI的权限准许功能，重构异步逻辑
+设计TUI的界面风格，增加命令的直观使用
 增加联网搜索功能
