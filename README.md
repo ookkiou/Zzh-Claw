@@ -78,3 +78,7 @@ python3 zzhclaw.py --mode cli
 ## 会话存储位置
 
 `~/.zzhclaw/sessions/`
+
+## TODO
+增加TUI的权限准许功能
+增加联网搜索功能
