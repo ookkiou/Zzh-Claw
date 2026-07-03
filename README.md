@@ -129,3 +129,6 @@ python3 zzhclaw.py --mode cli
 
 cli情况下，agent调用工具时弹出的执行请求过长，后续化简成：在xxx地点执行xxx操作即可
 
+让agent生成TODO方案为md文档，方便用户查看
+
+在用户规划项目时，给出具体的选择，例如用什么开发，功能完善度之类
