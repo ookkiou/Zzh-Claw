@@ -8,7 +8,7 @@ import subprocess
 from typing import Dict, Any, List
 
 try:
-    from duckduckgo_search import DDGS
+    from ddgs import DDGS
     HAS_DDGS = True
 except ImportError:
     HAS_DDGS = False
@@ -169,9 +169,13 @@ def run_bash(command: str) -> str:
 def web_search(query: str, num_results: int = 5) -> str:
     """联网搜索"""
     if not HAS_DDGS:
-        return "错误: 未安装 duckduckgo-search，请运行: pip3 install duckduckgo-search"
+        return "错误: 未安装 ddgs，请运行: pip3 install ddgs"
     try:
-        results = DDGS().text(query, max_results=num_results)
+        # bing backend 对中文最稳定;失败则回退 duckduckgo
+        try:
+            results = DDGS().text(query, max_results=num_results, backend="bing")
+        except Exception:
+            results = DDGS().text(query, max_results=num_results, backend="duckduckgo")
         if not results:
             return "无搜索结果"
         output = f"搜索结果: {query}\n\n"

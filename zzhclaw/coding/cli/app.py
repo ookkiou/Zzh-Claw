@@ -4,12 +4,13 @@ zzhclaw.cli - 命令行界面
 
 import sys
 from rich.console import Console
-from rich.prompt import Prompt, Confirm
 from rich.panel import Panel
 from rich.syntax import Syntax
 from rich.markdown import Markdown
 from rich.table import Table
 from rich import box
+from prompt_toolkit.shortcuts import prompt as pt_prompt
+from prompt_toolkit.formatted_text import HTML
 from ...ai import LLMClient
 from ...agent import Agent
 
@@ -68,7 +69,7 @@ def run_cli():
 
     while True:
         try:
-            user_input = Prompt.ask("\n[bold cyan]你[/bold cyan]")
+            user_input = pt_prompt(HTML('\n<ansicyan><b>你</b></ansicyan> '))
 
             if not user_input.strip():
                 continue
@@ -145,7 +146,8 @@ def run_cli():
 
             # 普通对话
             def confirm_tool(name: str, args: dict) -> bool:
-                return Confirm.ask(f"[yellow]执行工具 [bold]{name}[/bold] {args}?[/yellow]", default=True)
+                ans = pt_prompt(HTML(f'<ansiyellow>执行工具 <b>{name}</b> {args}? [Y/n]</ansiyellow> '))
+                return ans.strip().lower() in ("", "y", "yes")
 
             console.print("[bold green]AI 思考中...[/bold green]")
             response = agent.run(

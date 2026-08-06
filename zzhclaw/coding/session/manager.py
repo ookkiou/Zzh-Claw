@@ -238,20 +238,96 @@ class SessionManager:
         session.current_branch.messages.append(message)
         self.save_session()
 
-    def get_messages(self) -> List[Dict[str, Any]]:
-        """获取当前消息列表（给 LLM 用）"""
+    def get_messages(
+        self,
+        max_messages: int = 50,
+        max_chars: int = 80000,
+    ) -> List[Dict[str, Any]]:
+        """获取当前消息列表（给 LLM 用）
+
+        带 token 截断：保留首条 system 消息，保留最近的消息，并保证不会在
+        工具调用配对（assistant 的 tool_calls 与对应 tool 结果）中间截断，
+        避免长会话超出 context window。
+
+        max_messages: 滑动窗口最多保留的消息条数
+        max_chars:     近似 token 上限（按字符数估算，约 4 字符≈1 token）
+        """
         session = self.current_session
         if not session:
             return []
 
         # 转换为 OpenAI 格式
-        messages = []
-        for msg in session.current_branch.messages:
+        def to_dict(msg: Message) -> Dict[str, Any]:
             msg_dict = {"role": msg.role, "content": msg.content}
             if msg.tool_calls:
                 msg_dict["tool_calls"] = msg.tool_calls
             if msg.tool_call_id:
                 msg_dict["tool_call_id"] = msg.tool_call_id
-            messages.append(msg_dict)
+            return msg_dict
 
-        return messages
+        all_msgs = [to_dict(m) for m in session.current_branch.messages]
+        if not all_msgs:
+            return []
+
+        # 1. 首条 system 单独保留（始终留在窗口里）
+        system_msgs: List[Dict[str, Any]] = []
+        rest = all_msgs
+        if all_msgs[0]["role"] == "system":
+            system_msgs = [all_msgs[0]]
+            rest = all_msgs[1:]
+
+        # 2. 按条数取滑动窗口（保留最近 max_messages 条）
+        window = rest[-max_messages:]
+
+        # 3. 按字符上限从前往后砍，直到总量在预算内（至少保留 1 条）
+        def _char_count(msgs: List[Dict[str, Any]]) -> int:
+            n = 0
+            for m in msgs:
+                n += len(m.get("content") or "")
+                for tc in m.get("tool_calls") or []:
+                    n += len(tc.get("function", {}).get("arguments", ""))
+            return n
+
+        system_chars = _char_count(system_msgs)
+        while window and system_chars + _char_count(window) > max_chars and len(window) > 1:
+            window.pop(0)
+
+        # 4. 配对完整性修正：开头不能是孤立的 tool 结果，
+        #    也不能是 tool_calls 结果不全的 assistant（否则 API 会报错）
+        def _trim_orphans(msgs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+            # 去掉开头孤立的 tool 结果（它的 assistant 已被砍掉）
+            while msgs and msgs[0]["role"] == "tool":
+                msgs.pop(0)
+            # 去掉开头 tool_calls 结果不全的 assistant
+            if msgs and msgs[0]["role"] == "assistant" and msgs[0].get("tool_calls"):
+                tool_ids = {m["tool_call_id"] for m in msgs if m["role"] == "tool"}
+                asst_ids = {tc["id"] for tc in msgs[0]["tool_calls"]}
+                if not asst_ids.issubset(tool_ids):
+                    msgs.pop(0)
+                    return _trim_orphans(msgs)  # 砍完可能又露出孤立 tool，递归清理
+            return msgs
+
+        window = _trim_orphans(window)
+
+        # 5. 配对修复:确保每个 assistant(tool_calls) 的每个 tool_call_id
+        #    都有对应的 tool 结果,缺失的补占位(防止 API 报错;
+        #    也让因异常损坏的旧会话自愈)
+        def _fix_tool_call_pairs(msgs: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+            existing = {m["tool_call_id"] for m in msgs
+                        if m["role"] == "tool" and m.get("tool_call_id")}
+            result: List[Dict[str, Any]] = []
+            for m in msgs:
+                result.append(m)
+                if m["role"] == "assistant" and m.get("tool_calls"):
+                    for tc in m["tool_calls"]:
+                        if tc["id"] not in existing:
+                            result.append({
+                                "role": "tool",
+                                "content": "[工具未执行]",
+                                "tool_call_id": tc["id"],
+                            })
+            return result
+
+        window = _fix_tool_call_pairs(window)
+
+        return system_msgs + window

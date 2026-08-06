@@ -115,11 +115,15 @@ python3 zzhclaw.py --mode cli
 `~/.zzhclaw/sessions/`
 
 ## TODO
-增加TUI的权限准许功能，重构异步逻辑
+✅增加TUI的权限准许功能，重构异步逻辑，使用Textual原生 @work + post_message 消息机制
 
-设计TUI的界面风格，增加命令的直观使用
+✅历史会话截断功能
 
-增加联网搜索功能
+✅设计TUI的界面风格，增加命令的直观使用
+
+✅CLI模式下中文删除残留问题：使用prompt_toolkit解决
+
+上下文压缩功能
 
 使用pm2让它长期跑以及接入im
 
