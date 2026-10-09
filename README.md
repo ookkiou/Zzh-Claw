@@ -113,26 +113,3 @@ python3 zzhclaw.py --mode cli
 ## 会话存储位置
 
 `~/.zzhclaw/sessions/`
-
-## TODO
-✅增加TUI的权限准许功能，重构异步逻辑，使用Textual原生 @work + post_message 消息机制
-
-✅历史会话截断功能
-
-✅设计TUI的界面风格，增加命令的直观使用
-
-✅CLI模式下中文删除残留问题：使用prompt_toolkit解决
-
-上下文压缩功能
-
-使用pm2让它长期跑以及接入im
-
-增加goal
-
-设置当前工作目录
-
-cli情况下，agent调用工具时弹出的执行请求过长，后续化简成：在xxx地点执行xxx操作即可
-
-让agent生成TODO方案为md文档，方便用户查看
-
-在用户规划项目时，给出具体的选择，例如用什么开发，功能完善度之类

@@ -1,0 +1,10 @@
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+# 让测试直接 import zzhclaw，无需 pip install -e
+pythonpath = ["."]
+addopts = ["-ra", "--strict-markers"]
+markers = [
+    "network: 需要真实网络（默认被 conftest 的网络护栏拦截）",
+    "llm: 需要真实 API key 的冒烟测试，默认跳过，用 --run-llm 开启",
+]

@@ -22,6 +22,7 @@ wheels/
 
 # Virtual Environment
 .venv/
+.venv-1/
 env/
 ENV/
 
@@ -31,12 +32,28 @@ ENV/
 *.swp
 *.swo
 *~
+.trae/
+
 
 # Environment variables
 .env
 
 # Sessions
-*.json
+# 会话默认存于 ~/.zzhclaw/sessions/，不会进入项目目录；
+# 以下规则仅当用户将存储路径改为项目内时生效，避免误伤未来的 config.json / package.json 等。
+.zzhclaw/sessions/
+*.json.tmp
+.*.json.tmp
+
+# 文件锁（edit_file/write_file 并发控制产生的旁路锁文件）
+*.lock
 
 # macOS
 .DS_Store
+
+.docs
+
+# 测试产物
+.pytest_cache/
+.coverage
+htmlcov/
