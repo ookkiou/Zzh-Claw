@@ -1,4 +1,0 @@
-# 开发依赖（运行测试用，与运行时依赖分离）
--r requirements.txt
-pytest>=8.0
-pytest-cov>=5.0

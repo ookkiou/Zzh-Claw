@@ -29,6 +29,7 @@ ZzhClaw 是一个轻量级的 AI 助手，运行在你的终端里。它可以�
 zzhclaw/
 ├── zzhclaw/              # 主包
 │   ├── __init__.py
+│   ├── __main__.py       # 命令行入口 (zzhclaw / python -m zzhclaw)
 │   ├── ai/               # LLM API 封装
 │   │   ├── __init__.py
 │   │   └── client.py
@@ -49,8 +50,7 @@ zzhclaw/
 │   └── tui/              # Textual 终端界面
 │       ├── __init__.py
 │       └── app.py
-├── zzhclaw.py            # 入口
-├── requirements.txt      # 依赖
+├── pyproject.toml        # 打包与依赖配置
 └── .env                 # 配置
 ```
 
@@ -65,23 +65,48 @@ zzhclaw/
 
 ## 安装
 
+需要 Python 3.10+。
+
 ```bash
-cd zzhclaw
-pip3 install -r requirements.txt
+pipx install zzhclaw        # 推荐：独立虚拟环境 + 全局 zzhclaw 命令
+```
+
+```bash
+uv tool install zzhclaw     # 或 uv 用户；免安装直接跑：uvx zzhclaw
+```
+
+```bash
+pip install zzhclaw         # 或装进当前环境
+```
+
+### 从源码安装（开发）
+
+```bash
+git clone https://github.com/ookkiou/Zzh-Claw.git && cd Zzh-Claw
+pip install -e ".[dev]"
 ```
 
 ## 运行
 
-### TUI 模式 
-
 ```bash
-python3 zzhclaw.py
+zzhclaw                     # TUI 终端界面（默认）
+zzhclaw --mode cli          # CLI 模式 (推荐)
+zzhclaw --mode web          # 浏览器界面
+python -m zzhclaw           # 未装全局命令时的等价写法
 ```
 
-### CLI 模式 (推荐)
+## 配置
+
+首次运行前需要提供模型密钥，两种方式任选其一：
 
 ```bash
-python3 zzhclaw.py --mode cli
+# 1) 环境变量（对 pipx / uv 安装最直接）
+export OPENAI_API_KEY=sk-xxx
+export OPENAI_MODEL_ID=gpt-4o-mini          # 可选，默认 gpt-4o-mini
+export OPENAI_BASE_URL=https://api.openai.com/v1   # 可选，兼容 OpenAI 协议的服务都能用
+zzhclaw
+
+# 2) 在当前目录放一个 .env（参见仓库里的 .env.example）
 ```
 
 ## CLI 命令

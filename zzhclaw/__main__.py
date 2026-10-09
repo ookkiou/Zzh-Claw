@@ -1,12 +1,13 @@
-#!/usr/bin/env python3
-"""ZzhClaw - 入口文件"""
+"""ZzhClaw 命令行入口。"""
 
-import sys
 import argparse
 
 
 def main():
-    parser = argparse.ArgumentParser(description="ZzhClaw - AI 编码助手")
+    parser = argparse.ArgumentParser(
+        prog="zzhclaw",
+        description="ZzhClaw - AI 编码助手",
+    )
     parser.add_argument(
         "--mode",
         choices=["cli", "tui", "web"],
