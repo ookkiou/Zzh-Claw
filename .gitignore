@@ -51,7 +51,7 @@ ENV/
 # macOS
 .DS_Store
 
-.docs
+docs/
 
 # 测试产物
 .pytest_cache/
