@@ -57,3 +57,10 @@ docs/
 .pytest_cache/
 .coverage
 htmlcov/
+.ruff_cache/
+runs/
+
+# 本地实施计划与复盘，不随代码提交
+**/*_PLAN.md
+**/*_REVIEW.md
+local-notes/

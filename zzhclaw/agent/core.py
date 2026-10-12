@@ -3,11 +3,12 @@ zzhclaw.agent - Agent 核心逻辑
 """
 
 import json
-from typing import List, Dict, Any, Callable, Optional
-from ..ai import LLMClient
-from ..coding.tools import TOOLS, execute_tool, get_tools_with_cwd, is_readonly_tool
-from ..coding.session import SessionManager
+import time
+from typing import Any, Callable, Dict, List, Optional
 
+from ..ai import LLMClient
+from ..coding.session import SessionManager
+from ..coding.tools import execute_tool, get_tools_with_cwd, is_readonly_tool
 
 # 默认系统指令：引导模型在请求模糊时先澄清再行动
 DEFAULT_SYSTEM_PROMPT = (
@@ -104,12 +105,18 @@ class Agent:
         confirm_tool: Optional[Callable[[str, Dict], bool]] = None,
         on_token: Optional[Callable[[str], None]] = None,
         max_iterations: int = 20,
+        on_event: Optional[Callable[[Dict[str, Any]], None]] = None,
     ) -> str:
         """运行一次交互（流式）
 
         on_token: 流式 token 回调，签名 (delta_text: str) -> None，实时推送 AI 回复增量。
         max_iterations: 单次交互内工具调用轮次上限，防止模型陷入死循环持续烧钱。
+        on_event: 结构化生命周期事件回调，供评测与可观测性使用；不替代已有回调。
         """
+        def emit(event_type: str, **payload: Any) -> None:
+            if on_event:
+                on_event({"event_type": event_type, **payload})
+
         # 确保有会话
         if not self.session_manager.current_session:
             self.new_session()
@@ -119,6 +126,7 @@ class Agent:
 
         # 添加用户消息
         self.session_manager.add_message("user", user_input)
+        emit("agent_start", metadata={"max_iterations": max_iterations})
 
         # 主动触发历史摘要（上下文压缩）：把 keep_recent 之外的旧消息压缩成一段摘要。
         # 失败不阻塞主流程：get_messages 里的滑动窗口兑底仍能保证 API 调用不超预算。
@@ -132,37 +140,45 @@ class Agent:
         except Exception:
             pass
 
-        for _ in range(max_iterations):
+        for iteration in range(1, max_iterations + 1):
             # 获取消息
             messages = self.session_manager.get_messages()
 
             # 流式调用 LLM：边收边推送 content token，按 index 累积 tool_calls 增量
             content_parts: List[str] = []
             tool_calls_acc: Dict[int, Dict[str, str]] = {}
-            for delta in self.llm.chat_stream(messages, tools=get_tools_with_cwd()):
-                # content 增量
-                delta_content = getattr(delta, "content", None)
-                if delta_content:
-                    content_parts.append(delta_content)
-                    if on_token:
-                        on_token(delta_content)
-                # tool_calls 增量（按 index 拼接 arguments 片段）
-                delta_tcs = getattr(delta, "tool_calls", None)
-                if delta_tcs:
-                    for tc in delta_tcs:
-                        idx = getattr(tc, "index", None)
-                        idx = idx if idx is not None else 0
-                        acc = tool_calls_acc.setdefault(
-                            idx, {"id": "", "name": "", "arguments": ""}
-                        )
-                        if getattr(tc, "id", None):
-                            acc["id"] = tc.id
-                        fn = getattr(tc, "function", None)
-                        if fn:
-                            if getattr(fn, "name", None):
-                                acc["name"] = fn.name
-                            if getattr(fn, "arguments", None):
-                                acc["arguments"] += fn.arguments
+            try:
+                for delta in self.llm.chat_stream(messages, tools=get_tools_with_cwd()):
+                    # content 增量
+                    delta_content = getattr(delta, "content", None)
+                    if delta_content:
+                        content_parts.append(delta_content)
+                        if on_token:
+                            on_token(delta_content)
+                    # tool_calls 增量（按 index 拼接 arguments 片段）
+                    delta_tcs = getattr(delta, "tool_calls", None)
+                    if delta_tcs:
+                        for tc in delta_tcs:
+                            idx = getattr(tc, "index", None)
+                            idx = idx if idx is not None else 0
+                            acc = tool_calls_acc.setdefault(
+                                idx, {"id": "", "name": "", "arguments": ""}
+                            )
+                            if getattr(tc, "id", None):
+                                acc["id"] = tc.id
+                            fn = getattr(tc, "function", None)
+                            if fn:
+                                if getattr(fn, "name", None):
+                                    acc["name"] = fn.name
+                                if getattr(fn, "arguments", None):
+                                    acc["arguments"] += fn.arguments
+            except Exception as exc:
+                emit(
+                    "agent_error",
+                    error=f"{type(exc).__name__}: {exc}",
+                    metadata={"iteration": iteration, "stage": "llm"},
+                )
+                raise
 
             content = "".join(content_parts)
             # 组装 tool_calls 为标准 dict 格式（按 index 排序，过滤无效项）
@@ -193,18 +209,52 @@ class Agent:
                             raise ValueError(f"预期 dict，实际得到 {type(args).__name__}")
                     except (json.JSONDecodeError, ValueError) as e:
                         err = f"工具参数解析失败: {e}; 原始参数: {raw_args!r}"
+                        emit(
+                            "tool_call",
+                            tool_call_id=tc_id,
+                            tool_name=name,
+                            arguments=None,
+                            error=str(e),
+                            metadata={"iteration": iteration, "raw_arguments": raw_args},
+                        )
                         if on_tool_result:
                             on_tool_result(name, err)
                         self.session_manager.add_message("tool", err, tool_call_id=tc_id)
+                        emit(
+                            "tool_result",
+                            tool_call_id=tc_id,
+                            tool_name=name,
+                            result=err,
+                            duration_ms=0,
+                            error=str(e),
+                            metadata={"iteration": iteration},
+                        )
                         continue
+
+                    emit(
+                        "tool_call",
+                        tool_call_id=tc_id,
+                        tool_name=name,
+                        arguments=args,
+                        metadata={"iteration": iteration, "raw_arguments": raw_args},
+                    )
 
                     # 确认是否执行（根据权限模式决定是否需要问用户）
                     if self._should_confirm(name, confirm_tool):
                         if not confirm_tool(name, args):
+                            rejected = f"用户拒绝执行: {name}"
                             self.session_manager.add_message(
                                 "tool",
-                                f"用户拒绝执行: {name}",
+                                rejected,
                                 tool_call_id=tc_id
+                            )
+                            emit(
+                                "tool_result",
+                                tool_call_id=tc_id,
+                                tool_name=name,
+                                result=rejected,
+                                duration_ms=0,
+                                metadata={"iteration": iteration, "rejected": True},
                             )
                             continue
 
@@ -212,19 +262,37 @@ class Agent:
                         on_tool_call(name, args)
 
                     # 工具执行兜底：任何未捕获异常都转为结果字符串，保证会话配对不损坏
+                    tool_started = time.perf_counter()
+                    tool_error = None
                     try:
                         result = execute_tool(name, args)
                     except Exception as e:
                         result = f"工具执行异常: {type(e).__name__}: {e}"
+                        tool_error = f"{type(e).__name__}: {e}"
+                    tool_duration_ms = int((time.perf_counter() - tool_started) * 1000)
 
                     if on_tool_result:
                         on_tool_result(name, result)
 
                     # 工具结果也添加到会话，带上 tool_call_id
                     self.session_manager.add_message("tool", result, tool_call_id=tc_id)
+                    emit(
+                        "tool_result",
+                        tool_call_id=tc_id,
+                        tool_name=name,
+                        result=result,
+                        duration_ms=tool_duration_ms,
+                        error=tool_error,
+                        metadata={"iteration": iteration},
+                    )
                 continue
 
             # 没有工具调用，返回结果
+            emit(
+                "agent_final",
+                result=content,
+                metadata={"iteration": iteration, "termination": "completed"},
+            )
             return content
 
         # 达到最大迭代次数：写入一条提示作为 assistant 回复，保证会话历史完整
@@ -233,4 +301,9 @@ class Agent:
             "建议：拆分任务、缩小范围，或提高 max_iterations 后重试。"
         )
         self.session_manager.add_message("assistant", warning)
+        emit(
+            "agent_final",
+            result=warning,
+            metadata={"iteration": max_iterations, "termination": "max_iterations"},
+        )
         return warning

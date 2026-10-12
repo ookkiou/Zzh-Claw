@@ -1,0 +1,2 @@
+class FrameError(ValueError):
+    pass

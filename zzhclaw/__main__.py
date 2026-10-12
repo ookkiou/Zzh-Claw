@@ -1,9 +1,14 @@
 """ZzhClaw 命令行入口。"""
 
 import argparse
+import sys
 
 
 def main():
+    if sys.argv[1:2] == ["eval"]:
+        from zzhclaw.eval.cli import main as eval_main
+
+        return eval_main(sys.argv[2:])
     parser = argparse.ArgumentParser(
         prog="zzhclaw",
         description="ZzhClaw - AI 编码助手",
@@ -44,4 +49,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

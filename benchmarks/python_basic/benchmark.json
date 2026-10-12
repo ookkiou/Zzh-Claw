@@ -1,0 +1,9 @@
+{
+  "name": "python-basic",
+  "version": "0.1.0",
+  "description": "30 个离线 Python 编码任务：修复、实现、重构与多文件修改；6 train / 9 dev / 15 test",
+  "task_file": "tasks.jsonl",
+  "created_at": "2026-10-11",
+  "default_timeout_seconds": 180,
+  "default_max_iterations": 12
+}

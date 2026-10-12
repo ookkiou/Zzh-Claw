@@ -1,0 +1,9 @@
+{
+  "name": "python-challenge",
+  "version": "0.1.0",
+  "description": "6 original multi-file state/contract tasks; exploratory cross-agent pilot, not a general capability benchmark",
+  "task_file": "tasks.jsonl",
+  "created_at": "2026-10-12",
+  "default_timeout_seconds": 180,
+  "default_max_iterations": 12
+}

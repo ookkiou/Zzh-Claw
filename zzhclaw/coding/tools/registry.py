@@ -171,6 +171,11 @@ def set_sandbox(enabled: bool) -> None:
     _WORKSPACE["sandbox"] = enabled
 
 
+def get_sandbox() -> bool:
+    """返回当前线程的写沙箱状态。"""
+    return bool(_WORKSPACE.get("sandbox", True))
+
+
 def _resolve_path(path: str) -> str:
     """解析路径：相对路径基于 cwd，绝对路径规范化"""
     if os.path.isabs(path):
