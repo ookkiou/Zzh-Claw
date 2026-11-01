@@ -93,6 +93,7 @@ def _run(args, benchmark):
     from zzhclaw.agent import Agent
     from zzhclaw.agent.core import DEFAULT_SYSTEM_PROMPT
     from zzhclaw.ai import LLMClient
+    from zzhclaw.ai.usage import RequestPricing
     from zzhclaw.coding.tools.registry import get_skills_dir
 
     if args.resume and not args.output:
@@ -141,6 +142,10 @@ def _run(args, benchmark):
         "api_timeout": os.getenv("OPENAI_TIMEOUT", "60"),
         "api_max_retries": os.getenv("OPENAI_MAX_RETRIES", "3"),
     }
+    if args.agent == "zzhclaw":
+        pricing = RequestPricing.from_env()
+        configuration["pricing"] = pricing.to_dict() if pricing else None
+        configuration["stream_usage"] = os.getenv("OPENAI_STREAM_USAGE", "true").lower()
     if args.task_timeout or args.agent == "aider":
         configuration["global_skills_sha256"] = hashlib.sha256().hexdigest()
         configuration["user_home"] = "isolated_per_attempt"

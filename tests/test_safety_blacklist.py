@@ -54,7 +54,7 @@ def test_run_bash_refuses_without_reaching_subprocess(monkeypatch):
     def explode(*args, **kwargs):
         raise AssertionError("被拦截的命令不应进入 subprocess")
 
-    monkeypatch.setattr(registry.subprocess, "run", explode)
+    monkeypatch.setattr(registry, "run_command", explode)
 
     result = run_bash("rm -rf /")
 

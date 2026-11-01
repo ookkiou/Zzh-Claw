@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 import os
-import subprocess
 import sys
-import time
 from pathlib import Path
 from typing import Dict
+
+from zzhclaw.runtime import run_command
 
 from .models import EvalTask, ValidatorResult
 
@@ -27,14 +27,6 @@ _ENV_ALLOWLIST = {
 
 class ValidatorExecutionError(RuntimeError):
     """验收进程无法启动或无法正常收集结果。"""
-
-
-def _text(value) -> str:
-    if value is None:
-        return ""
-    if isinstance(value, bytes):
-        return value.decode("utf-8", errors="replace")
-    return str(value)
 
 
 class ExternalValidator:
@@ -67,37 +59,24 @@ class ExternalValidator:
         command = [
             self._expand(part, workspace_path) for part in task.validator.command
         ]
-        started = time.perf_counter()
-        try:
-            completed = subprocess.run(
-                command,
-                cwd=self.benchmark_root,
-                env=self._environment(task, workspace_path),
-                capture_output=True,
-                text=True,
-                timeout=task.validator.timeout_seconds,
-                shell=False,
-                check=False,
-            )
-        except subprocess.TimeoutExpired as exc:
-            duration_ms = int((time.perf_counter() - started) * 1000)
-            return ValidatorResult(
-                exit_code=None,
-                timed_out=True,
-                stdout=_text(exc.stdout)[: self.output_limit],
-                stderr=_text(exc.stderr)[: self.output_limit],
-                duration_ms=duration_ms,
-            )
-        except OSError as exc:
-            raise ValidatorExecutionError(
-                f"无法启动 validator 命令 {command!r}: {type(exc).__name__}: {exc}"
-            ) from exc
-
-        duration_ms = int((time.perf_counter() - started) * 1000)
+        result = run_command(
+            command,
+            cwd=self.benchmark_root,
+            env=self._environment(task, workspace_path),
+            timeout=task.validator.timeout_seconds,
+            output_limit=self.output_limit,
+        )
+        if result.status == "capture_error":
+            raise ValidatorExecutionError("validator 输出收集失败，不能判定任务通过")
+        if result.status == "spawn_error":
+            raise ValidatorExecutionError(f"无法启动 validator 命令: {result.error}")
         return ValidatorResult(
-            exit_code=completed.returncode,
-            timed_out=False,
-            stdout=completed.stdout[: self.output_limit],
-            stderr=completed.stderr[: self.output_limit],
-            duration_ms=duration_ms,
+            exit_code=result.exit_code,
+            timed_out=result.status == "timeout",
+            stdout=result.stdout,
+            stderr=result.stderr,
+            duration_ms=result.duration_ms,
+            stdout_truncated=result.stdout_truncated,
+            stderr_truncated=result.stderr_truncated,
+            error_code=result.error_code,
         )

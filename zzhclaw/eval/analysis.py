@@ -29,7 +29,17 @@ def analyze_run(root):
             category = "no_tool_action"
         elif any(
             event.event_type == "tool_result"
-            and (event.error or (event.result or "").startswith(("错误:", "未知工具:")))
+            and (
+                bool(
+                    event.metadata.get("error_code")
+                    and event.metadata.get("error_code") != "user_rejected"
+                )
+                if event.metadata.get("result_schema_version") == 1
+                else (
+                    event.error
+                    or (event.result or "").startswith(("错误:", "未知工具:"))
+                )
+            )
             for event in row["events"]
         ):
             category = "tool_error_observed"

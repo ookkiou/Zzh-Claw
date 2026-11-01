@@ -17,7 +17,6 @@ from .models import (
     EvalTask,
     SafetyMetrics,
     TaskRunResult,
-    UsageMetrics,
     ValidatorResult,
     utc_now_iso,
 )
@@ -158,6 +157,9 @@ class TaskRunner:
                                 "exit_code": validator_result.exit_code,
                                 "timed_out": validator_result.timed_out,
                                 "stderr": validator_result.stderr,
+                                "stdout_truncated": validator_result.stdout_truncated,
+                                "stderr_truncated": validator_result.stderr_truncated,
+                                "error_code": validator_result.error_code,
                             },
                         )
         except KeyboardInterrupt:
@@ -180,11 +182,11 @@ class TaskRunner:
         try:
             recorder.write(trace_path)
             safety = SafetyMetrics(
-                workspace_violations=sum(
-                    1 for _ in recorder.results_containing("写入被沙箱拒绝")
+                workspace_violations=recorder.count_tool_error(
+                    "workspace_violation", legacy_text="写入被沙箱拒绝"
                 ),
-                dangerous_command_rejections=sum(
-                    1 for _ in recorder.results_containing("危险命令")
+                dangerous_command_rejections=recorder.count_tool_error(
+                    "policy_rejected", legacy_text="危险命令"
                 ),
                 user_confirmation_requests=0,
             )
@@ -201,7 +203,7 @@ class TaskRunner:
                 tool_calls=recorder.tool_call_count,
                 final_answer=final_answer,
                 validator=validator_result,
-                usage=UsageMetrics(),
+                usage=recorder.usage,
                 safety=safety,
                 trace_file=str(trace_path.relative_to(self.run_root)),
                 workspace_diff_file=None,

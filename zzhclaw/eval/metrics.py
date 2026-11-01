@@ -12,6 +12,13 @@ def _average(values):
     return mean(values) if values else None
 
 
+def _usage_total(results, name):
+    values = [getattr(result.usage, name) for result in results]
+    return (
+        sum(values) if values and all(value is not None for value in values) else None
+    )
+
+
 def aggregate(records: list[dict], manifest: dict) -> dict:
     counts = Counter(row["result"].status for row in records)
     # cancelled 不是完成，invalid_task 不参与能力分母；基础设施失败保留在分母中。
@@ -33,12 +40,17 @@ def aggregate(records: list[dict], manifest: dict) -> dict:
                 previous = key
                 invalid += bool(event.error)
             if event.event_type == "tool_result":
-                # 当前工具层部分错误通过字符串返回；分类是近似诊断。
-                invalid += bool((event.result or "").startswith("未知工具:"))
-                tool_errors += bool(
-                    event.error
-                    or (event.result or "").startswith(("错误:", "未知工具:"))
-                )
+                if event.metadata.get("result_schema_version") == 1:
+                    code = event.metadata.get("error_code")
+                    invalid += code == "unknown_tool"
+                    tool_errors += bool(code and code != "user_rejected")
+                else:
+                    # 旧轨迹兼容；新轨迹不依据输出文字推断成功或失败。
+                    invalid += bool((event.result or "").startswith("未知工具:"))
+                    tool_errors += bool(
+                        event.error
+                        or (event.result or "").startswith(("错误:", "未知工具:"))
+                    )
             if (
                 event.event_type == "agent_final"
                 and event.metadata.get("termination") == "max_iterations"
@@ -91,12 +103,6 @@ def aggregate(records: list[dict], manifest: dict) -> dict:
         "fully_repeated_tasks": len(complete_groups),
         "observed_pass_at_k": _average(any(values) for values in complete_groups),
         "consistency_at_k": _average(all(values) for values in complete_groups),
-        "input_tokens": sum(result.usage.input_tokens for result in results)
-        if results and all(result.usage.input_tokens is not None for result in results)
-        else None,
-        "output_tokens": sum(result.usage.output_tokens for result in results)
-        if results and all(result.usage.output_tokens is not None for result in results)
-        else None,
     }
 
     if not available:
@@ -114,4 +120,44 @@ def aggregate(records: list[dict], manifest: dict) -> dict:
             summary[name] = None
     summary["agent"] = manifest.get("configuration", {}).get("agent", "zzhclaw")
     summary["tool_metrics_available"] = available
+    # 费用统计覆盖所有已保存 attempt（包含中断），能力分母仍按原有口径。
+    observed = [row["result"] for row in records]
+    successful = [result for result in results if result.status == "passed"]
+    for name in (
+        "input_tokens",
+        "output_tokens",
+        "request_count",
+        "request_duration_ms",
+        "requests_with_usage",
+    ):
+        summary[name] = _usage_total(observed, name)
+        total = _usage_total(successful, name)
+        summary[f"average_successful_{name}"] = (
+            total / len(successful) if total is not None else None
+        )
+    currencies = {result.usage.currency for result in observed}
+    summary["currency"] = next(iter(currencies)) if len(currencies) == 1 else None
+    summary["estimated_cost"] = (
+        _usage_total(observed, "estimated_cost")
+        if summary["currency"] is not None
+        else None
+    )
+    currencies = {result.usage.currency for result in successful}
+    summary["successful_cost_currency"] = (
+        next(iter(currencies)) if len(currencies) == 1 else None
+    )
+    total = _usage_total(successful, "estimated_cost")
+    summary["average_successful_estimated_cost"] = (
+        total / len(successful)
+        if total is not None and len(currencies) == 1 and None not in currencies
+        else None
+    )
+    summary["observed_usage_attempts"] = len(observed)
+    summary["token_usage_attempts"] = sum(
+        result.usage.input_tokens is not None and result.usage.output_tokens is not None
+        for result in observed
+    )
+    summary["priced_attempts"] = sum(
+        result.usage.estimated_cost is not None for result in observed
+    )
     return summary

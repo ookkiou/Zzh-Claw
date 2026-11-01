@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
@@ -12,6 +13,8 @@ TASK_DIFFICULTIES = frozenset({"easy", "medium", "hard"})
 TRACE_EVENT_TYPES = frozenset(
     {
         "agent_start",
+        "llm_request_start",
+        "llm_request_end",
         "tool_call",
         "tool_result",
         "agent_final",
@@ -314,6 +317,10 @@ class ValidatorResult(JsonModel):
     stderr: str = ""
     duration_ms: Optional[int] = None
 
+    stdout_truncated: bool = False
+    stderr_truncated: bool = False
+    error_code: Optional[str] = None
+
     def __post_init__(self) -> None:
         if self.exit_code is not None and (
             isinstance(self.exit_code, bool) or not isinstance(self.exit_code, int)
@@ -323,6 +330,12 @@ class ValidatorResult(JsonModel):
             raise ValueError("validator_result.timed_out 必须是 boolean")
         if not isinstance(self.stdout, str) or not isinstance(self.stderr, str):
             raise ValueError("validator_result.stdout/stderr 必须是字符串")
+        if not isinstance(self.stdout_truncated, bool) or not isinstance(
+            self.stderr_truncated, bool
+        ):
+            raise ValueError("validator_result 截断标记必须是 boolean")
+        if self.error_code is not None and not isinstance(self.error_code, str):
+            raise ValueError("validator_result.error_code 必须是字符串或 null")
         _non_negative_int(
             self.duration_ms, "validator_result.duration_ms", optional=True
         )
@@ -332,6 +345,9 @@ class ValidatorResult(JsonModel):
         data = _mapping(raw, "validator_result")
         return cls(
             exit_code=data.get("exit_code"),
+            stdout_truncated=data.get("stdout_truncated", False),
+            stderr_truncated=data.get("stderr_truncated", False),
+            error_code=_optional_string(data, "error_code"),
             timed_out=data.get("timed_out", False),
             stdout=data.get("stdout", ""),
             stderr=data.get("stderr", ""),
@@ -347,17 +363,22 @@ class UsageMetrics(JsonModel):
     output_tokens: Optional[int] = None
     estimated_cost: Optional[float] = None
     currency: Optional[str] = None
+    request_count: Optional[int] = None
+    request_duration_ms: Optional[int] = None
+    requests_with_usage: Optional[int] = None
 
     def __post_init__(self) -> None:
         _non_negative_int(self.input_tokens, "usage.input_tokens", optional=True)
         _non_negative_int(self.output_tokens, "usage.output_tokens", optional=True)
+        for key in ("request_count", "request_duration_ms", "requests_with_usage"):
+            _non_negative_int(getattr(self, key), f"usage.{key}", optional=True)
         if self.estimated_cost is not None:
             if isinstance(self.estimated_cost, bool) or not isinstance(
                 self.estimated_cost, (int, float)
             ):
                 raise ValueError("usage.estimated_cost 必须是数字或 null")
-            if self.estimated_cost < 0:
-                raise ValueError("usage.estimated_cost 不能为负数")
+            if not math.isfinite(self.estimated_cost) or self.estimated_cost < 0:
+                raise ValueError("usage.estimated_cost 必须是有限非负数")
         if self.currency is not None and not isinstance(self.currency, str):
             raise ValueError("usage.currency 必须是字符串或 null")
 
@@ -365,14 +386,13 @@ class UsageMetrics(JsonModel):
     def from_dict(cls, raw: Mapping[str, Any]) -> "UsageMetrics":
         data = _mapping(raw, "usage")
         return cls(
-            input_tokens=_non_negative_int(
-                data.get("input_tokens"), "usage.input_tokens", optional=True
-            ),
-            output_tokens=_non_negative_int(
-                data.get("output_tokens"), "usage.output_tokens", optional=True
-            ),
+            input_tokens=data.get("input_tokens"),
+            output_tokens=data.get("output_tokens"),
             estimated_cost=data.get("estimated_cost"),
-            currency=_optional_string(data, "currency"),
+            currency=data.get("currency"),
+            request_count=data.get("request_count"),
+            request_duration_ms=data.get("request_duration_ms"),
+            requests_with_usage=data.get("requests_with_usage"),
         )
 
 

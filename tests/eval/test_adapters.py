@@ -193,3 +193,37 @@ def test_worker_partial_events_and_final_answer_replayed(tmp_path, monkeypatch):
         task, cwd, output, recorder
     )
     assert result == "done" and len(recorder.events) == 2
+
+
+def test_workspace_package_cannot_shadow_host_worker(tmp_path, monkeypatch):
+    benchmark = load_benchmark(MANIFEST)
+    task = benchmark.task_by_id("python-001")
+    workspace = tmp_path / "repo"
+    (workspace / "zzhclaw").mkdir(parents=True)
+    (workspace / "zzhclaw/__init__.py").write_text(
+        "# historical package without eval\n"
+    )
+    output = tmp_path / "output"
+    output.mkdir()
+    real_supervised = supervised
+
+    def without_model_call(command, *, cwd, env, output, timeout):
+        request_path = Path(command[-1])
+        request = json.loads(request_path.read_text())
+        # 零轮次只用于导入集成测试，不调用任何模型；正式任务仍使用正预算。
+        request["max_iterations"] = 0
+        request_path.write_text(json.dumps(request))
+        env.update(
+            OPENAI_API_KEY="fake-import-test",
+            OPENAI_BASE_URL="https://example.invalid/v1",
+        )
+        return real_supervised(
+            command, cwd=cwd, env=env, output=output, timeout=timeout
+        )
+
+    monkeypatch.setattr("zzhclaw.eval.adapters.supervised", without_model_call)
+    answer = SubprocessAdapter("zzhclaw", model="fake", prompt="system").run_task(
+        task, workspace, output, TrajectoryRecorder()
+    )
+    assert "轮次上限 (0)" in answer
+    assert (output / "worker-answer.json").exists()
