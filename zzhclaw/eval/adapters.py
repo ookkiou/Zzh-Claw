@@ -5,11 +5,11 @@ from __future__ import annotations
 import hashlib
 import json
 import os
-import signal
-import subprocess
 import sys
 from pathlib import Path
 from typing import Protocol
+
+from zzhclaw.runtime import run_command
 
 from .models import TraceEvent
 from .storage import write_json_atomic
@@ -23,60 +23,17 @@ class AgentAdapter(Protocol):
     def run_task(self, task, workspace: Path, output: Path, recorder) -> str: ...
 
 
-def _stop(process):
-    if os.name == "posix":
-        try:
-            os.killpg(process.pid, signal.SIGKILL)
-        except ProcessLookupError:
-            pass
-    else:
-        process.kill()
-    process.wait()
-
-
 def supervised(command, *, cwd, env, output, timeout):
-    """禁用 shell；超时/中断终止进程组，日志落盘而非无限缓存在内存。"""
+    """通过统一执行器收集有界日志并转换 Agent 执行状态。"""
     output.mkdir(parents=True, exist_ok=True)
-    raw = output / ".agent-output.tmp"
-    timed_out = False
-    try:
-        with raw.open("wb") as stream:
-            process = subprocess.Popen(
-                command,
-                cwd=cwd,
-                env=env,
-                stdin=subprocess.DEVNULL,
-                stdout=stream,
-                stderr=subprocess.STDOUT,
-                start_new_session=os.name == "posix",
-            )
-            try:
-                process.wait(timeout=timeout)
-            except subprocess.TimeoutExpired:
-                timed_out = True
-                _stop(process)
-            except BaseException:
-                _stop(process)
-                raise
-    finally:
-        if raw.exists():
-            with raw.open("rb") as stream:
-                stream.seek(0, 2)
-                size = stream.tell()
-                stream.seek(max(0, size - 1_000_000))
-                log = stream.read().decode("utf-8", errors="replace")
-            for key, value in env.items():
-                if value and any(
-                    word in key for word in ("API_KEY", "TOKEN", "SECRET")
-                ):
-                    log = log.replace(value, "[REDACTED]")
-            (output / "agent.log").write_text(log, encoding="utf-8")
-            raw.unlink()
-    if timed_out:
-        raise AgentDeadlineExceeded(f"Agent 超过 {timeout} 秒预算，已终止进程组")
-    if process.returncode:
-        raise RuntimeError(f"Agent 进程退出码 {process.returncode}；查看 agent.log")
-    return log[-16000:]
+    path = output / "agent.log"
+    result = run_command(command, cwd=cwd, env=env, timeout=timeout, log_path=path)
+    write_json_atomic(output / "command.json", result.metadata())
+    if result.status == "timeout":
+        raise AgentDeadlineExceeded(f"Agent 超过 {timeout} 秒预算，已清理执行进程")
+    if result.status != "succeeded":
+        raise RuntimeError(f"Agent 执行失败 ({result.error_code})；查看 agent.log")
+    return path.read_text(encoding="utf-8")[-16000:]
 
 
 class SubprocessAdapter:
@@ -135,7 +92,18 @@ class SubprocessAdapter:
             events.unlink(missing_ok=True)
             answer.unlink(missing_ok=True)
             env["PYTHONPATH"] = str(Path(__file__).resolve().parents[2])
-            command = [sys.executable, "-m", "zzhclaw.eval.worker", str(request)]
+            # 工作区可能包含同名 zzhclaw 包；明确优先导入宿主 worker。
+            bootstrap = (
+                "import runpy,sys;sys.path.insert(0,sys.argv.pop(1));"
+                "runpy.run_module('zzhclaw.eval.worker',run_name='__main__')"
+            )
+            command = [
+                sys.executable,
+                "-c",
+                bootstrap,
+                str(Path(__file__).resolve().parents[2]),
+                str(request),
+            ]
         else:
             if not self.executable or not Path(self.executable).is_file():
                 raise ValueError("Aider 可执行文件不存在；使用 --aider-executable 指定")
@@ -238,16 +206,11 @@ class SubprocessAdapter:
 def executable_identity(path):
     """固定 Aider 版本和启动文件内容用于断点续跑身份检查。"""
     executable = Path(path).expanduser().resolve()
-    try:
-        result = subprocess.run(
-            [str(executable), "--version"],
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=True,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        raise ValueError("无法读取 Aider 版本；请检查 --aider-executable") from exc
+    result = run_command(
+        [str(executable), "--version"], cwd=executable.parent, timeout=30
+    )
+    if result.status != "succeeded":
+        raise ValueError("无法读取 Aider 版本；请检查 --aider-executable")
     return {
         "executable": str(executable),
         "version": result.stdout.strip(),

@@ -1,6 +1,7 @@
 """独立进程中的 ZzhClaw；逐事件刷新，允许父进程终止并保存部分轨迹。"""
 
 import json
+import signal
 import sys
 from pathlib import Path
 
@@ -8,12 +9,19 @@ from zzhclaw.agent import Agent
 from zzhclaw.ai import LLMClient
 from zzhclaw.coding.session import SessionManager
 from zzhclaw.coding.tools import set_cwd, set_sandbox
+from zzhclaw.runtime.commands import kill_active_commands
 
 from .recorder import TrajectoryRecorder
 from .storage import write_json_atomic
 
 
 def main():
+    # 外层监督器终止 worker 时，允许内层执行器清理独立的工具进程组。
+    def terminate(signum, frame):
+        kill_active_commands()
+        raise KeyboardInterrupt("worker terminated")
+
+    signal.signal(signal.SIGTERM, terminate)
     request = json.loads(Path(sys.argv[1]).read_text())
     set_cwd(request["workspace"])
     set_sandbox(True)

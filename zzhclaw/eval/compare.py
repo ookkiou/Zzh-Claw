@@ -3,7 +3,7 @@
 from itertools import combinations
 
 from .metrics import aggregate
-from .report import cell, load_run, percentage
+from .report import cell, load_run, number, percentage
 
 
 def compare_runs(left, right):
@@ -102,6 +102,27 @@ def comparison_markdown(roots):
                 "N/A" if data[name] is None else f"{data[name]:.2f}" for data in (a, b)
             ]
             lines.append(f"| {name} | {values[0]} | {values[1]} |")
+        for name in (
+            "input_tokens",
+            "output_tokens",
+            "request_count",
+            "request_duration_ms",
+            "estimated_cost",
+            "average_successful_input_tokens",
+            "average_successful_output_tokens",
+            "average_successful_request_count",
+            "average_successful_estimated_cost",
+        ):
+            lines.append(f"| {name} | {number(a[name])} | {number(b[name])} |")
+        lines.append(
+            f"| 估算成本币种 | {cell(a['currency'] or 'N/A')} | "
+            f"{cell(b['currency'] or 'N/A')} |"
+        )
+        lines.append(
+            "| 成功任务估算成本币种 | "
+            f"{cell(a['successful_cost_currency'] or 'N/A')} | "
+            f"{cell(b['successful_cost_currency'] or 'N/A')} |"
+        )
         lines += ["", "| 标签 | 左侧成功率 | 右侧成功率 |", "|---|---:|---:|"]
         for tag in sorted(a["by_tag"].keys() | b["by_tag"].keys()):
             lines.append(

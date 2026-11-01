@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Mapping
 
-from .models import TraceEvent
+from .models import TraceEvent, UsageMetrics
 from .storage import write_jsonl_atomic
 
 _EVENT_FIELDS = {
@@ -42,6 +42,63 @@ class TrajectoryRecorder:
             if isinstance(value, int) and not isinstance(value, bool) and value >= 0:
                 values.append(value)
         return max(values, default=0)
+
+    @property
+    def usage(self) -> UsageMetrics:
+        starts = [
+            event for event in self._events if event.event_type == "llm_request_start"
+        ]
+        if not starts and not any(
+            event.event_type == "agent_start"
+            and event.metadata.get("llm_observability")
+            for event in self._events
+        ):
+            return UsageMetrics()
+        ends = {
+            event.metadata["request_id"]: event
+            for event in self._events
+            if event.event_type == "llm_request_end"
+        }
+        finished = [
+            ends[event.metadata["request_id"]]
+            for event in starts
+            if event.metadata["request_id"] in ends
+        ]
+        complete = len(finished) == len(starts)
+        tokens_complete = complete and all(
+            event.metadata["input_tokens"] is not None
+            and event.metadata["output_tokens"] is not None
+            for event in finished
+        )
+        currencies = {event.metadata["currency"] for event in finished}
+        cost_complete = (
+            complete
+            and bool(finished)
+            and len(currencies) == 1
+            and None not in currencies
+            and all(event.metadata["estimated_cost"] is not None for event in finished)
+        )
+        return UsageMetrics(
+            input_tokens=sum(event.metadata["input_tokens"] for event in finished)
+            if tokens_complete
+            else None,
+            output_tokens=sum(event.metadata["output_tokens"] for event in finished)
+            if tokens_complete
+            else None,
+            request_count=len(starts),
+            request_duration_ms=sum(event.duration_ms for event in finished)
+            if complete
+            else None,
+            requests_with_usage=sum(
+                event.metadata["input_tokens"] is not None
+                and event.metadata["output_tokens"] is not None
+                for event in finished
+            ),
+            estimated_cost=sum(event.metadata["estimated_cost"] for event in finished)
+            if cost_complete
+            else None,
+            currency=next(iter(currencies)) if len(currencies) == 1 else None,
+        )
 
     def __call__(self, raw: Mapping[str, Any]) -> TraceEvent:
         if not isinstance(raw, Mapping):
@@ -80,4 +137,13 @@ class TrajectoryRecorder:
             event
             for event in self._events
             if event.event_type == "tool_result" and text in (event.result or "")
+        )
+
+    def count_tool_error(self, code: str, *, legacy_text: str) -> int:
+        return sum(
+            event.metadata.get("error_code") == code
+            if event.metadata.get("result_schema_version") == 1
+            else legacy_text in (event.result or "")
+            for event in self._events
+            if event.event_type == "tool_result"
         )

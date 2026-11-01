@@ -21,6 +21,7 @@ ZzhClaw 是一个轻量级的 AI 助手，运行在你的终端里。它可以�
 | `zzhclaw.ai` | 统一的 LLM API 封装 (兼容 OpenAI API) |
 | `zzhclaw.agent` | Agent 核心，支持工具调用和状态管理 |
 | `zzhclaw.coding` | 编码助手核心（含工具、会话、CLI） |
+| `zzhclaw.runtime` | 统一命令执行、有界输出、进程清理与结构化结果 |
 | `zzhclaw.eval` | 任务验收、批量评测、报告、失败诊断与跨 Agent 对比 |
 | `zzhclaw.tui` | Textual 终端界面 |
 
@@ -157,7 +158,20 @@ zzhclaw eval analyze runs/prompt-test/candidate
 不要同时向同一个运行目录启动多个进程。
 
 报告提供成功率、标签统计、工具调用与时延、超时与安全诊断、观测 pass@k 和 consistency@k。
-未完成的评测会显示待完成次数；token 未接入时显示 `N/A`。
+未完成的评测会显示待完成次数。原生 ZzhClaw 记录每次模型请求的输入/输出 token、
+请求次数和耗时（包括历史摘要），并在任务结果和报告中汇总。
+可在 `.env` 中同时设置 `OPENAI_INPUT_PRICE_PER_MILLION` 和
+`OPENAI_OUTPUT_PRICE_PER_MILLION`，按每百万 token 单价估算成本；
+`OPENAI_PRICE_CURRENCY` 默认为 `USD`。单价快照保存在轨迹与 CLI 运行配置中。
+未配置价格时仍统计 token，费用显示 `N/A`。
+
+流式接口默认发送 `stream_options.include_usage=true`；不支持该参数的兼容服务可配置
+`OPENAI_STREAM_USAGE=false`。服务未返回 usage、流中断或旧记录缺少数据时，
+对应完整 token/成本总量显示 `N/A`，覆盖度单独报告，不按字符数猜测。
+请求次数按 SDK 调用计数，包含失败请求，SDK 内部 HTTP 重试不单独计数；
+请求耗时包含重试等待和完整流消费，工具与验收耗时不包含在内。
+报告同时给出所有已保存 attempt（含中断）的总消耗及成功任务的平均消耗。
+成本按统一输入/输出单价估算，不含缓存差价、优惠或税费；混合币种不相加。
 运行对比按任务 ID 和重复序号配对，展示胜负、成功率差值及效率变化。
 退出码：全部通过 `0`，存在失败或未完成 `1`，配置或产物错误 `2`，用户中断 `130`。
 
@@ -169,10 +183,16 @@ POSIX 进程组；验收在 Agent 结束后另有独立时限，不包含在 Age
 外部 Aider 默认使用任务的 `task_timeout_seconds`；原始内部工具/安全指标无法观测时
 显示 `N/A`。`agent.log` 保存最多末尾 1 MB 日志并替换环境变量中的密钥值。
 Windows 目前只终止直接子进程，不保证终止孙进程。
+工具命令、Validator 与 Agent 监督共用统一执行器；工具每路输出最多保留 100,000 字节，
+非 UTF-8 内容使用替换字符。普通工具进程不自动继承模型凭据，进程正常结束也会清理
+同组后台进程，因此不适合启动常驻服务。新轨迹记录明确的错误码和截断标记。
+详细接口与边界见 [本地命令执行契约](zzhclaw/runtime/README.md)。
 内置 [python-basic v0.1](benchmarks/python_basic/README.md) 的 30 个离线编码任务，
 分为 6 train、9 dev、15 test，提供外部验收和参考修复。
 另有 [python-challenge v0.1](benchmarks/python_challenge/README.md) 的 6 道多文件任务，
 包含 2 dev / 4 test，适合跨系统流程验证和探索，不作为通用排行榜。
+[python-repo v0.1](benchmarks/python_repo/README.md) 使用固定历史提交的完整 ZzhClaw 源码，
+包含 3 dev / 3 test，要求通过新增目标用例与冻结的原回归测试；保留许可证和源文件校验清单。
 Aider 使用全部任务源码作为初始可编辑上下文及自身系统提示词，ZzhClaw 自主读取文件；
 两边共享模型、任务、验收和时间预算，内部策略与调用次数限制并不完全相同。
 工作区外的测试和参考答案不是真正的权限隔离；小型人工任务集不能代表全面的 Agent 能力。

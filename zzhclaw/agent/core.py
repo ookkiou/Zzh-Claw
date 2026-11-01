@@ -126,14 +126,25 @@ class Agent:
 
         # 添加用户消息
         self.session_manager.add_message("user", user_input)
-        emit("agent_start", metadata={"max_iterations": max_iterations})
+        request_options = (
+            {"on_request": on_event} if isinstance(self.llm, LLMClient) else {}
+        )
+        emit(
+            "agent_start",
+            metadata={
+                "max_iterations": max_iterations,
+                "llm_observability": isinstance(self.llm, LLMClient),
+            },
+        )
 
         # 主动触发历史摘要（上下文压缩）：把 keep_recent 之外的旧消息压缩成一段摘要。
         # 失败不阻塞主流程：get_messages 里的滑动窗口兑底仍能保证 API 调用不超预算。
         # 放在循环外而不是循环内：单次 run 内消息增长有限，每轮都触发意义不大且增加成本。
         try:
             self.session_manager.summarize_old_messages(
-                summarize_fn=self.llm.summarize,
+                summarize_fn=lambda existing, messages: self.llm.summarize(
+                    existing, messages, **request_options
+                ),
                 keep_recent=20,
                 min_new_to_summarize=10,
             )
@@ -148,7 +159,9 @@ class Agent:
             content_parts: List[str] = []
             tool_calls_acc: Dict[int, Dict[str, str]] = {}
             try:
-                for delta in self.llm.chat_stream(messages, tools=get_tools_with_cwd()):
+                for delta in self.llm.chat_stream(
+                    messages, tools=get_tools_with_cwd(), **request_options
+                ):
                     # content 增量
                     delta_content = getattr(delta, "content", None)
                     if delta_content:
@@ -227,7 +240,11 @@ class Agent:
                             result=err,
                             duration_ms=0,
                             error=str(e),
-                            metadata={"iteration": iteration},
+                            metadata={
+                                "iteration": iteration,
+                                "error_code": "invalid_arguments",
+                                "result_schema_version": 1,
+                            },
                         )
                         continue
 
@@ -254,7 +271,12 @@ class Agent:
                                 tool_name=name,
                                 result=rejected,
                                 duration_ms=0,
-                                metadata={"iteration": iteration, "rejected": True},
+                                metadata={
+                                    "iteration": iteration,
+                                    "rejected": True,
+                                    "error_code": "user_rejected",
+                                    "result_schema_version": 1,
+                                },
                             )
                             continue
 
@@ -269,6 +291,15 @@ class Agent:
                     except Exception as e:
                         result = f"工具执行异常: {type(e).__name__}: {e}"
                         tool_error = f"{type(e).__name__}: {e}"
+                    result_metadata = {"iteration": iteration}
+                    if hasattr(result, "trace_metadata"):
+                        result_metadata.update(result.trace_metadata())
+                        if result.error_code and not tool_error:
+                            tool_error = result.error_code
+                    elif tool_error:
+                        result_metadata.update(
+                            error_code="tool_exception", result_schema_version=1
+                        )
                     tool_duration_ms = int((time.perf_counter() - tool_started) * 1000)
 
                     if on_tool_result:
@@ -283,7 +314,7 @@ class Agent:
                         result=result,
                         duration_ms=tool_duration_ms,
                         error=tool_error,
-                        metadata={"iteration": iteration},
+                        metadata=result_metadata,
                     )
                 continue
 

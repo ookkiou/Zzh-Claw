@@ -8,11 +8,12 @@ import json
 import time
 import fnmatch
 import glob
-import subprocess
 import threading
 import fcntl
 from contextlib import contextmanager
 from typing import Dict, Any, List, Optional
+
+from zzhclaw.runtime import ToolResult, run_command
 
 try:
     from ddgs import DDGS
@@ -156,7 +157,7 @@ def set_cwd(path: str) -> str:
     """设置工作目录，返回规范化绝对路径或错误信息"""
     abs_path = os.path.abspath(os.path.expanduser(path))
     if not os.path.isdir(abs_path):
-        return f"错误: 目录不存在: {abs_path}"
+        return ToolResult(f"错误: 目录不存在: {abs_path}", error_code="tool_error")
     _WORKSPACE["cwd"] = abs_path
     return abs_path
 
@@ -190,9 +191,10 @@ def _check_write_sandbox(resolved_path: str) -> Optional[str]:
     real_target = os.path.realpath(resolved_path)
     real_cwd = os.path.realpath(_WORKSPACE["cwd"])
     if not (real_target == real_cwd or real_target.startswith(real_cwd + os.sep)):
-        return (
+        return ToolResult(
             f"错误: 写入被沙箱拒绝。目标 {resolved_path} 不在工作目录 {_WORKSPACE['cwd']} 内。\n"
-            "如需写入外部路径，请用 /sandbox off 关闭沙箱（谨慎）。"
+            "如需写入外部路径，请用 /sandbox off 关闭沙箱（谨慎）。",
+            error_code="workspace_violation",
         )
     return None
 
@@ -499,7 +501,7 @@ def read_file(path: str) -> str:
         with open(resolved, "r", encoding="utf-8") as f:
             return f.read()
     except Exception as e:
-        return f"错误: {e}"
+        return ToolResult(f"错误: {e}", error_code="tool_error")
 
 
 def write_file(path: str, content: str) -> str:
@@ -517,9 +519,11 @@ def write_file(path: str, content: str) -> str:
                 f.write(content)
         return f"成功写入: {resolved}"
     except TimeoutError as e:
-        return f"错误: {e}（另一个任务正在写该文件，请稍后重试）"
+        return ToolResult(
+            f"错误: {e}（另一个任务正在写该文件，请稍后重试）", error_code="tool_error"
+        )
     except Exception as e:
-        return f"错误: {e}"
+        return ToolResult(f"错误: {e}", error_code="tool_error")
 
 
 def edit_file(path: str, old_text: str, new_text: str, replace_all: bool = False) -> str:
@@ -533,7 +537,9 @@ def edit_file(path: str, old_text: str, new_text: str, replace_all: bool = False
         return sandbox_err
 
     if old_text == new_text:
-        return "错误: old_text 和 new_text 相同，无需修改"
+        return ToolResult(
+            "错误: old_text 和 new_text 相同，无需修改", error_code="tool_error"
+        )
 
     try:
         with _file_lock(resolved):
@@ -542,22 +548,28 @@ def edit_file(path: str, old_text: str, new_text: str, replace_all: bool = False
                 with open(resolved, "r", encoding="utf-8") as f:
                     content = f.read()
             except FileNotFoundError:
-                return f"错误: 文件不存在: {resolved}"
+                return ToolResult(
+                    f"错误: 文件不存在: {resolved}",
+                    error_code="tool_error",
+                )
             except Exception as e:
-                return f"错误: 读取文件失败: {e}"
+                return ToolResult(f"错误: 读取文件失败: {e}", error_code="tool_error")
 
             # 匹配检查
             count = content.count(old_text)
             if count == 0:
-                return (
+                return ToolResult(
                     f"错误: 未找到要替换的文本。\n"
                     "请确保 old_text 与文件内容精确匹配（包括空格、缩进、换行符）。\n"
-                    "提示：可先用 read_file 查看文件实际内容，复制精确片段。"
+                    "提示：可先用 read_file 查看文件实际内容，复制精确片段。",
+                    error_code="tool_error",
                 )
             if count > 1 and not replace_all:
-                return (
+                return ToolResult(
                     f"错误: 找到 {count} 处匹配，old_text 不唯一。\n"
-                    f"请提供更多上下文使其唯一，或设 replace_all=true 替换全部 {count} 处。"
+                    "请提供更多上下文使其唯一，"
+                    f"或设 replace_all=true 替换全部 {count} 处。",
+                    error_code="tool_error",
                 )
 
             # 执行替换
@@ -573,48 +585,55 @@ def edit_file(path: str, old_text: str, new_text: str, replace_all: bool = False
                 with open(resolved, "w", encoding="utf-8") as f:
                     f.write(new_content)
             except Exception as e:
-                return f"错误: 写入失败: {e}"
+                return ToolResult(f"错误: 写入失败: {e}", error_code="tool_error")
 
         return f"成功编辑: {resolved}（替换 {replaced} 处）"
     except TimeoutError as e:
-        return f"错误: {e}（另一个任务正在编辑该文件，请稍后重试）"
+        return ToolResult(
+            f"错误: {e}（另一个任务正在编辑该文件，请稍后重试）",
+            error_code="tool_error",
+        )
 
 
 def run_bash(command: str) -> str:
-    """运行 bash 命令（带危险命令拦截）"""
-    # 安全策略：命中黑名单直接拒绝，不给用户误按 Y 的机会
+    """执行本地 shell，文字反馈兼容，附带结构化命令状态。"""
     danger = check_dangerous_command(command)
     if danger:
-        return (
-            f"错误: 命令被安全策略拒绝执行（命中：{danger}）。\n"
+        return ToolResult(
+            "错误: 命令被安全策略拒绝执行（命中：" + danger + "）。\n"
             f"原始命令：{command}\n"
-            "如确需执行，请提示用户手动在终端运行，或拆分为更安全的子命令。"
+            "如确需执行，请提示用户手动在终端运行，或拆分为更安全的子命令。",
+            error_code="policy_rejected",
         )
-    try:
-        result = subprocess.run(
-            command,
-            shell=True,
-            capture_output=True,
-            text=True,
-            timeout=30,
-            cwd=_WORKSPACE["cwd"],
-        )
-        output = result.stdout
-        if result.stderr:
-            output += "\n" + result.stderr
-        if result.returncode != 0:
-            output += f"\n(退出码: {result.returncode})"
-        return output or "(无输出)"
-    except subprocess.TimeoutExpired:
-        return "错误: 命令超时 (30秒)"
-    except Exception as e:
-        return f"错误: {e}"
+    result = run_command(command, shell=True, cwd=_WORKSPACE["cwd"], timeout=30)
+    output = result.stdout
+    if result.stderr:
+        output += "\n" + result.stderr
+    if result.status == "timeout":
+        output += ("\n" if output else "") + "错误: 命令超时 (30秒)"
+    elif result.status == "spawn_error":
+        output += ("\n" if output else "") + f"错误: {result.error}"
+    elif result.status == "capture_error":
+        output += ("\n" if output else "") + "错误: 命令输出读取不完整"
+    elif result.status == "cancelled":
+        output += ("\n" if output else "") + "错误: 命令已取消"
+    elif result.exit_code != 0:
+        output += f"\n(退出码: {result.exit_code})"
+    if result.stdout_truncated or result.stderr_truncated:
+        output += "\n(输出已截断，每路最多保留 100000 字节)"
+    return ToolResult(
+        output or "(无输出)",
+        error_code=result.error_code,
+        metadata={"command": result.metadata()},
+    )
 
 
 def web_search(query: str, num_results: int = 5) -> str:
     """联网搜索"""
     if not HAS_DDGS:
-        return "错误: 未安装 ddgs，请运行: pip3 install ddgs"
+        return ToolResult(
+            "错误: 未安装 ddgs，请运行: pip3 install ddgs", error_code="tool_error"
+        )
     try:
         # bing backend 对中文最稳定;失败则回退 duckduckgo
         try:
@@ -630,13 +649,17 @@ def web_search(query: str, num_results: int = 5) -> str:
             output += f"    {r.get('body', '无摘要')}\n\n"
         return output
     except Exception as e:
-        return f"搜索错误: {e}"
+        return ToolResult(f"搜索错误: {e}", error_code="tool_error")
 
 
 def fetch_webpage(url: str, max_length: int = 10000) -> str:
     """获取网页内容"""
     if not HAS_WEB:
-        return "错误: 未安装 requests/beautifulsoup4，请运行: pip3 install requests beautifulsoup4"
+        return ToolResult(
+            "错误: 未安装 requests/beautifulsoup4，请运行: "
+            "pip3 install requests beautifulsoup4",
+            error_code="tool_error",
+        )
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
@@ -656,7 +679,7 @@ def fetch_webpage(url: str, max_length: int = 10000) -> str:
             text = text[:max_length] + f"\n\n(已截断，超过 {max_length} 字符)"
         return f"网页: {url}\n\n{text}"
     except Exception as e:
-        return f"获取网页错误: {e}"
+        return ToolResult(f"获取网页错误: {e}", error_code="tool_error")
 
 
 def grep_files(pattern: str, path: str = ".", include: Optional[str] = None,
@@ -664,13 +687,13 @@ def grep_files(pattern: str, path: str = ".", include: Optional[str] = None,
     """在文件内容里搜索匹配正则的行（类似 grep -rn）"""
     search_root = _resolve_path(path)
     if not os.path.isdir(search_root):
-        return f"错误: 目录不存在: {search_root}"
+        return ToolResult(f"错误: 目录不存在: {search_root}", error_code="tool_error")
 
     flags = re.IGNORECASE if ignore_case else 0
     try:
         regex = re.compile(pattern, flags)
     except re.error as e:
-        return f"错误: 无效的正则表达式: {e}"
+        return ToolResult(f"错误: 无效的正则表达式: {e}", error_code="tool_error")
 
     matches: List[str] = []
     files_scanned = 0
@@ -708,13 +731,13 @@ def glob_files(pattern: str, path: str = ".", max_results: int = 100) -> str:
     """按 glob 模式查找文件路径（支持 ** 递归）"""
     search_root = _resolve_path(path)
     if not os.path.isdir(search_root):
-        return f"错误: 目录不存在: {search_root}"
+        return ToolResult(f"错误: 目录不存在: {search_root}", error_code="tool_error")
 
     full_pattern = os.path.join(search_root, pattern)
     try:
         results = glob.glob(full_pattern, recursive=True)
     except Exception as e:
-        return f"错误: glob 失败: {e}"
+        return ToolResult(f"错误: glob 失败: {e}", error_code="tool_error")
 
     # 过滤忽略目录里的结果，转为相对路径
     filtered: List[str] = []
@@ -816,13 +839,15 @@ def load_skill(name: str) -> str:
 
     if target_path is None:
         avail = ", ".join(s["name"] for s in list_skills()) or "（无）"
-        return f"错误: 未找到 skill '{name}'。可用 skill: {avail}"
+        return ToolResult(
+            f"错误: 未找到 skill '{name}'。可用 skill: {avail}", error_code="tool_error"
+        )
 
     try:
         with open(target_path, "r", encoding="utf-8") as f:
             content = f.read()
     except Exception as e:
-        return f"错误: 读取 skill 失败: {e}"
+        return ToolResult(f"错误: 读取 skill 失败: {e}", error_code="tool_error")
     meta, body = _parse_frontmatter(content)
     header = f"[已加载 skill: {meta.get('name', safe)}（{target_scope}）]\n"
     if meta.get("description"):
@@ -890,7 +915,7 @@ def create_skill(name: str, scope: str = "project") -> tuple:
     )
 
 
-def execute_tool(name: str, args: Dict[str, Any]) -> str:
+def _dispatch_tool(name: str, args: Dict[str, Any]) -> str:
     """执行工具"""
     if name == "read_file":
         return read_file(args["path"])
@@ -926,4 +951,11 @@ def execute_tool(name: str, args: Dict[str, Any]) -> str:
     elif name == "Skill":
         return skill_tool(args.get("name"))
     else:
-        return f"未知工具: {name}"
+        return ToolResult(f"未知工具: {name}", error_code="unknown_tool")
+
+
+def execute_tool(name: str, args: Dict[str, Any]) -> str:
+    result = _dispatch_tool(name, args)
+    if isinstance(result, ToolResult):
+        return result
+    return ToolResult(result)
