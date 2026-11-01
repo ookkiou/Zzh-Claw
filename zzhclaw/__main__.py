@@ -5,6 +5,10 @@ import sys
 
 
 def main():
+    if sys.argv[1:2] == ["repair"]:
+        from zzhclaw.agent.repair_cli import main as repair_main
+
+        return repair_main(sys.argv[2:])
     if sys.argv[1:2] == ["eval"]:
         from zzhclaw.eval.cli import main as eval_main
 

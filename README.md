@@ -14,6 +14,14 @@ ZzhClaw 是一个轻量级的 AI 助手，运行在你的终端里。它可以�
 
 既可以用命令行（CLI）快速操作，也可以用终端界面（TUI）获得更直观的体验。
 
+## 可选代码修复 profile
+
+新增显式入口 `python -m zzhclaw repair --help`，用于接入配套 agent-r1 项目的 step70 模型。需要将该训练仓库加入 `PYTHONPATH`，使用受限 dev 任务公开导出、本机 Docker 验收服务和经 SSH 转发的 vLLM API；不需要付费 OpenAI key 或在 Mac 下载模型权重。
+
+此入口复用训练时的三工具 JSON 协议，每个任务新建会话，最多六次决策。通用 CLI / TUI / Web 的模型和工具配置保持现有行为。真实模型回接与应用内同环境 dev 对照已完成：SFT-only 69/96、GRPO step70 75/96，+6.25 个百分点，配对改善 9 / 退化 3。该结果限于受限修复 profile 的 32 个 dev 变体和三个 seeds，未检验统计显著性，不代表通用编码能力或 UI 全流程验收。
+
+在配套训练仓库中查看 `docs/DAY13_14_ZZHCLAW_RUNBOOK.md`，按“上传小脚本 → 启动模型服务 → SSH API 转发 → 两题 smoke → 完整 dev 对照”操作。
+
 ## 模块说明
 
 | 模块 | 说明 |
